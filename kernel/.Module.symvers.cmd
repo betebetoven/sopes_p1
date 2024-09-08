@@ -1,0 +1,1 @@
+savedcmd_/home/alber/Desktop/sopes_p1/kernel/Module.symvers :=  scripts/mod/modpost -M -m -a      -o /home/alber/Desktop/sopes_p1/kernel/Module.symvers -T /home/alber/Desktop/sopes_p1/kernel/modules.order -i Module.symvers -e 

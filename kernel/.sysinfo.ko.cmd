@@ -1,0 +1,1 @@
+savedcmd_/home/alber/Desktop/sopes_p1/kernel/sysinfo.ko := ld -r -EL  -maarch64elf -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T arch/arm64/module.lds -o /home/alber/Desktop/sopes_p1/kernel/sysinfo.ko /home/alber/Desktop/sopes_p1/kernel/sysinfo.o /home/alber/Desktop/sopes_p1/kernel/sysinfo.mod.o;  true
