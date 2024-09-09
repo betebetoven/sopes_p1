@@ -13,7 +13,7 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Alberto Josué Hernández Armas");
 MODULE_DESCRIPTION("Kernel module to monitor container process memory and CPU usage");
-MODULE_VERSION("1.2");
+MODULE_VERSION("1.3");
 
 #define PROC_ENTRY_NAME "container_info_201903553"
 #define TARGET_PROC_NAME "containerd-shim"
@@ -21,12 +21,46 @@ MODULE_VERSION("1.2");
 // Prototype for function to calculate RSS (Resident Set Size)
 unsigned long calculate_memory_usage(struct task_struct *task);
 
+// Function to extract container ID from command line arguments
+char* extract_container_id(struct task_struct *task) {
+    unsigned long arg_start = task->mm->arg_start;
+    unsigned long arg_end = task->mm->arg_end;
+    int len = arg_end - arg_start;
+
+    if (len > 0 && len < 350) {
+        static char cmdlineBuffer[350];
+        memset(cmdlineBuffer, 0, sizeof(cmdlineBuffer));
+        int read = access_process_vm(task, arg_start, cmdlineBuffer, len, FOLL_FORCE);
+        if (read > 0) {
+            // Replace null characters with spaces for easier parsing
+            for (int i = 0; i < read - 1; i++) {
+                if (cmdlineBuffer[i] == '\0') {
+                    cmdlineBuffer[i] = ' ';
+                }
+            }
+            cmdlineBuffer[read] = '\0';  // Properly terminate the string
+
+            // Find "-id" in the command line
+            char *id_pos = strstr(cmdlineBuffer, "-id");
+            if (id_pos) {
+                id_pos += 4;  // Skip past "-id "
+                char *end_id = strchr(id_pos, ' ');
+                if (end_id) {
+                    *end_id = '\0';  // Terminate the ID at the next space
+                }
+                return id_pos;
+            }
+        }
+    }
+    return "N/A";  // If no ID is found
+}
+
 // Optimized function to accumulate resources of child processes
 void accumulate_resources(struct task_struct *task, unsigned long *vsz, unsigned long *rss) {
     struct task_struct *child;
     struct list_head *list;
 
-    // Traverse all child processes in a non-recursive way
+    // Traverse all child processes
     list_for_each(list, &task->children) {
         child = list_entry(list, struct task_struct, sibling);
 
@@ -62,7 +96,10 @@ static int display_container_info(struct seq_file *m, void *v) {
         }
         first_process = 0;
 
-        seq_printf(m, "   {\n     \"process_name\":\"%s\",\n     \"pid\": \"%d\",\n", task->comm, task->pid);
+        char *container_id = extract_container_id(task);
+
+        seq_printf(m, "   {\n     \"process_name\":\"%s\",\n     \"pid\": \"%d\",\n     \"container_id\": \"%s\",\n",
+                   task->comm, task->pid, container_id);
 
         if (task->mm) {
             unsigned long vsz_kb = task->mm->total_vm * (PAGE_SIZE / 1024);
@@ -76,7 +113,7 @@ static int display_container_info(struct seq_file *m, void *v) {
             seq_printf(m, "     \"vsz_kb\":%lu,\n     \"rss_kb\":%lu,\n     \"memory_usage_percent\":%lu.%02lu,\n     \"cpu_usage_percent\":%lu.%02lu\n",
                        vsz_kb, rss_kb, memory_usage_percent / 100, memory_usage_percent % 100, cpu_usage_percent / 100, cpu_usage_percent % 100);
         } else {
-            seq_printf(m, "     \"container_id\": \"N/A\",\n     \"vsz_kb\": \"0\",\n     \"rss_kb\": \"0\",\n     \"memory_usage_percent\": \"0\",\n     \"cpu_usage_percent\": \"0\"\n");
+            seq_printf(m, "     \"vsz_kb\": \"0\",\n     \"rss_kb\": \"0\",\n     \"memory_usage_percent\": \"0\",\n     \"cpu_usage_percent\": \"0\"\n");
         }
     }
 
