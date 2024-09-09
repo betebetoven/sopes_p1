@@ -93,38 +93,27 @@ fn main() -> std::io::Result<()> {
     println!("Free RAM: {} KB", parsed_data.free_memory_kb);
     println!("Used RAM: {} KB", parsed_data.used_memory_kb);
 
-    // Initialize vectors for high-performance and low-performance containers
-    let mut high_performance_containers = vec![];
+    // Initialize vectors for low-performance and high-performance containers
     let mut low_performance_containers = vec![];
+    let mut high_performance_containers = vec![];
 
-    // Refined performance analysis criteria
-    let total_memory_kb = parsed_data.total_memory_kb as f64;
-    let total_cpu_percent = 100.0;  // Assuming 100% CPU power for simplicity
-
-    // Analyze each container
+    // Analyze each container based on CPU and memory usage
     for process in &parsed_data.processes {
-        // Calculate memory usage as a percentage of total system memory
-        let memory_usage_relative = (process.rss_kb as f64 / total_memory_kb) * 100.0;
-
-        // Calculate a memory-to-CPU ratio
-        let memory_to_cpu_ratio = if process.cpu_usage_percent > 0.0 {
-            memory_usage_relative / process.cpu_usage_percent
-        } else {
-            std::f64::MAX  // If no CPU usage, consider it as a high memory-to-CPU ratio
-        };
-
-        // Refined conditions for high-performance containers:
-        // High memory-to-CPU ratio means the container is consuming more memory relative to CPU.
-        if process.cpu_usage_percent > 0.20 || memory_to_cpu_ratio < 2.0 {
-            high_performance_containers.push(process);
-        } else {
+        // Identify low-performance containers (CPU usage <= 0.02% or memory usage <= 0.14%)
+        // if process.cpu_usage_percent == 0.00 then put it in low_performance_containers
+        if process.cpu_usage_percent == 0.00 {
             low_performance_containers.push(process);
+        } else
+        if process.cpu_usage_percent <= 0.09 && process.memory_usage_percent <= 0.16 {
+            low_performance_containers.push(process);
+        } else {
+            high_performance_containers.push(process);
         }
     }
 
-    // Print high-performance containers
-    println!("\nHigh-Performance Containers (High CPU or High memory-to-CPU efficiency):");
-    for process in &high_performance_containers {
+    // Print low-performance containers
+    println!("\nLow-Performance Containers (CPU usage <= 0.02% or Memory usage <= 0.14%):");
+    for process in &low_performance_containers {
         println!("PID: {}", process.pid);
         println!("Name: {}", process.process_name);
         println!("Container ID: {}", process.container_id);
@@ -134,9 +123,9 @@ fn main() -> std::io::Result<()> {
         println!("CPU Usage: {:.2}%\n", process.cpu_usage_percent);
     }
 
-    // Print low-performance containers
-    println!("\nLow-Performance Containers (Low CPU and low memory-to-CPU efficiency):");
-    for process in &low_performance_containers {
+    // Print high-performance containers
+    println!("\nHigh-Performance Containers (CPU usage > 0.02% and Memory usage > 0.14%):");
+    for process in &high_performance_containers {
         println!("PID: {}", process.pid);
         println!("Name: {}", process.process_name);
         println!("Container ID: {}", process.container_id);

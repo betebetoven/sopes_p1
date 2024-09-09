@@ -10,8 +10,6 @@ generate_random_name() {
     cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 12 | head -n 1
 }
 
-
-
 # Loop to create 10 containers
 for i in {1..10}; do
     # Generate a random name for the container
@@ -28,6 +26,6 @@ for i in {1..10}; do
         docker run -d --name "$container_name" high_ram_container
     else
         echo "Creating low consumption container: $container_name"
-        docker run -d --name "$container_name" low_consumption_container
+        docker run -d --name "$container_name" --cpus=".01" --memory="6m" low_consumption_container
     fi
 done

@@ -55,7 +55,7 @@ char* extract_container_id(struct task_struct *task) {
     return "N/A";  // If no ID is found
 }
 
-// Optimized function to accumulate resources of child processes
+// Recursive function to accumulate resources of all descendant processes
 void accumulate_resources(struct task_struct *task, unsigned long *vsz, unsigned long *rss) {
     struct task_struct *child;
     struct list_head *list;
@@ -64,12 +64,17 @@ void accumulate_resources(struct task_struct *task, unsigned long *vsz, unsigned
     list_for_each(list, &task->children) {
         child = list_entry(list, struct task_struct, sibling);
 
+        // If the child has a memory descriptor, accumulate its memory usage
         if (child->mm) {
-            *vsz += child->mm->total_vm * (PAGE_SIZE / 1024);
-            *rss += get_mm_rss(child->mm) * (PAGE_SIZE / 1024);
+            *vsz += child->mm->total_vm * (PAGE_SIZE / 1024);  // Virtual memory size
+            *rss += get_mm_rss(child->mm) * (PAGE_SIZE / 1024); // Resident Set Size
         }
+
+        // Recursively accumulate the resources of the child's children (descendants)
+        accumulate_resources(child, vsz, rss);
     }
 }
+
 
 // Optimized function to display system information
 static int display_container_info(struct seq_file *m, void *v) {
@@ -110,7 +115,8 @@ static int display_container_info(struct seq_file *m, void *v) {
 
             accumulate_resources(task, &vsz_kb, &rss_kb);
 
-            seq_printf(m, "     \"vsz_kb\":%lu,\n     \"rss_kb\":%lu,\n     \"memory_usage_percent\":%lu.%02lu,\n     \"cpu_usage_percent\":%lu.%02lu\n",
+            // Add quotes around the numeric values to store them as strings in JSON
+            seq_printf(m, "     \"vsz_kb\":\"%lu\",\n     \"rss_kb\":\"%lu\",\n     \"memory_usage_percent\":\"%lu.%02lu\",\n     \"cpu_usage_percent\":\"%lu.%02lu\"\n",
                        vsz_kb, rss_kb, memory_usage_percent / 100, memory_usage_percent % 100, cpu_usage_percent / 100, cpu_usage_percent % 100);
         } else {
             seq_printf(m, "     \"vsz_kb\": \"0\",\n     \"rss_kb\": \"0\",\n     \"memory_usage_percent\": \"0\",\n     \"cpu_usage_percent\": \"0\"\n");
@@ -123,6 +129,7 @@ static int display_container_info(struct seq_file *m, void *v) {
     seq_printf(m, "]\n}\n");
     return 0;
 }
+
 
 // Open handler for /proc entry
 static int open_container_info(struct inode *inode, struct file *file) {

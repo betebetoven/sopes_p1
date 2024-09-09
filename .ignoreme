@@ -4,7 +4,9 @@ cat /proc/container_info_201903553
 sudo rmmod sysinfo
 sudo insmod sysinfo.ko
 chmod +x ./create_containers.sh
-
+docker build -t high_cpu_container .
+docker build -t high_ram_container .
+docker build -t low_consumption_container .
 
 
 
