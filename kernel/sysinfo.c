@@ -1,3 +1,5 @@
+// Module for collecting container process memory and CPU usage information
+#include <linux/uaccess.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -5,112 +7,114 @@
 #include <linux/seq_file.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
-#include <linux/sched/signal.h>
-#include <linux/uaccess.h> // For command-line arguments
 #include <linux/timer.h>
 #include <linux/jiffies.h>
-#include <linux/signal.h>
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Your Name");
-MODULE_DESCRIPTION("Kernel module to display memory and container process info");
-MODULE_VERSION("1.0");
+MODULE_AUTHOR("Alberto Josué Hernández Armas");
+MODULE_DESCRIPTION("Kernel module to monitor container process memory and CPU usage");
+MODULE_VERSION("1.2");
 
-#define PROC_NAME "container_meminfo"
-#define TARGET_PROCESS "containerd-shim"
+#define PROC_ENTRY_NAME "container_info_201903553"
+#define TARGET_PROC_NAME "containerd-shim"
 
-static unsigned long calculate_mem_usage(struct task_struct *task) {
-    struct mm_struct *mm = task->mm;
-    if (!mm)
-        return 0;
+// Prototype for function to calculate RSS (Resident Set Size)
+unsigned long calculate_memory_usage(struct task_struct *task);
 
-    unsigned long rss = get_mm_rss(mm); // RSS in pages
-    return rss << (PAGE_SHIFT - 10); // Convert pages to KB
+// Optimized function to accumulate resources of child processes
+void accumulate_resources(struct task_struct *task, unsigned long *vsz, unsigned long *rss) {
+    struct task_struct *child;
+    struct list_head *list;
+
+    // Traverse all child processes in a non-recursive way
+    list_for_each(list, &task->children) {
+        child = list_entry(list, struct task_struct, sibling);
+
+        if (child->mm) {
+            *vsz += child->mm->total_vm * (PAGE_SIZE / 1024);
+            *rss += get_mm_rss(child->mm) * (PAGE_SIZE / 1024);
+        }
+    }
 }
 
-static int container_meminfo_show(struct seq_file *m, void *v) {
+// Optimized function to display system information
+static int display_container_info(struct seq_file *m, void *v) {
     struct sysinfo si;
     struct task_struct *task;
-    int first_process = 1; // Track the first process for proper comma placement
+    int first_process = 1;
 
-    // Get memory information
     si_meminfo(&si);
-    unsigned long total_ram = si.totalram * 4; // KB
-    unsigned long free_ram = si.freeram * 4;   // KB
-    unsigned long used_ram = total_ram - free_ram;
+    unsigned long total_memory_kb = si.totalram * (PAGE_SIZE / 1024);
+    unsigned long free_memory_kb = si.freeram * (PAGE_SIZE / 1024);
+    unsigned long used_memory_kb = total_memory_kb - free_memory_kb;
 
-    // Start JSON object
-    seq_printf(m, "{\n");
-    
-    // Print system memory info as JSON
-    seq_printf(m, "  \"system_memory\": {\n");
-    seq_printf(m, "    \"total_ram\": %lu,\n", total_ram);
-    seq_printf(m, "    \"free_ram\": %lu,\n", free_ram);
-    seq_printf(m, "    \"used_ram\": %lu\n", used_ram);
-    seq_printf(m, "  },\n");
+    seq_printf(m, "{\n  \"total_memory_kb\": \"%lu\",\n  \"free_memory_kb\": \"%lu\",\n  \"used_memory_kb\": \"%lu\",\n  \"processes\": [\n",
+               total_memory_kb, free_memory_kb, used_memory_kb);
 
-    // Print container processes as JSON array
-    seq_printf(m, "  \"container_processes\": [\n");
-
-    // Iterate over each task (process)
+    // Traverse all processes
     for_each_process(task) {
-        char comm[TASK_COMM_LEN];
-        get_task_comm(comm, task);
+        if (strcmp(task->comm, TARGET_PROC_NAME) != 0) {
+            continue;
+        }
 
-        // Only include processes named "containerd-shim"
-        if (strcmp(comm, TARGET_PROCESS) == 0) {
-            if (task->mm) { // Only consider tasks with memory maps
-                unsigned long vsz = task->mm->total_vm << (PAGE_SHIFT - 10); // Vsz in KB
-                unsigned long rss = calculate_mem_usage(task);               // RSS in KB
-                unsigned long mem_usage_percent = (rss * 100) / total_ram;   // Memory usage percentage
+        if (!first_process) {
+            seq_printf(m, "},\n");
+        }
+        first_process = 0;
 
-                // Placeholder for CPU usage
-                unsigned long total_cpu_usage = task->se.sum_exec_runtime; // CPU usage in nanoseconds
+        seq_printf(m, "   {\n     \"process_name\":\"%s\",\n     \"pid\": \"%d\",\n", task->comm, task->pid);
 
-                // Print container process info
-                if (!first_process) {
-                    seq_printf(m, ",\n"); // Add a comma between process entries
-                }
-                first_process = 0;
+        if (task->mm) {
+            unsigned long vsz_kb = task->mm->total_vm * (PAGE_SIZE / 1024);
+            unsigned long rss_kb = calculate_memory_usage(task);
+            unsigned long memory_usage_percent = (rss_kb * 10000) / total_memory_kb;
+            unsigned long total_cpu_time = task->utime + task->stime;
+            unsigned long cpu_usage_percent = (total_cpu_time * 10000) / jiffies;
 
-                seq_printf(m, "    {\n");
-                seq_printf(m, "      \"pid\": %d,\n", task->pid);
-                seq_printf(m, "      \"name\": \"%s\",\n", comm);
-                seq_printf(m, "      \"vsz\": %lu,\n", vsz);
-                seq_printf(m, "      \"rss\": %lu,\n", rss);
-                seq_printf(m, "      \"memory_usage\": %lu,\n", mem_usage_percent);
-                seq_printf(m, "      \"cpu_usage\": %lu\n", total_cpu_usage);
-                seq_printf(m, "    }");
-            }
+            accumulate_resources(task, &vsz_kb, &rss_kb);
+
+            seq_printf(m, "     \"vsz_kb\":%lu,\n     \"rss_kb\":%lu,\n     \"memory_usage_percent\":%lu.%02lu,\n     \"cpu_usage_percent\":%lu.%02lu\n",
+                       vsz_kb, rss_kb, memory_usage_percent / 100, memory_usage_percent % 100, cpu_usage_percent / 100, cpu_usage_percent % 100);
+        } else {
+            seq_printf(m, "     \"container_id\": \"N/A\",\n     \"vsz_kb\": \"0\",\n     \"rss_kb\": \"0\",\n     \"memory_usage_percent\": \"0\",\n     \"cpu_usage_percent\": \"0\"\n");
         }
     }
 
-    // Close JSON array and object
-    seq_printf(m, "\n  ]\n");
-    seq_printf(m, "}\n");
-
+    if (!first_process) {
+        seq_printf(m, "}\n");
+    }
+    seq_printf(m, "]\n}\n");
     return 0;
 }
 
-static int container_meminfo_open(struct inode *inode, struct file *file) {
-    return single_open(file, container_meminfo_show, NULL);
+// Open handler for /proc entry
+static int open_container_info(struct inode *inode, struct file *file) {
+    return single_open(file, display_container_info, NULL);
 }
 
-static const struct proc_ops container_meminfo_ops = {
-    .proc_open = container_meminfo_open,
+// Operations struct for /proc entry
+static const struct proc_ops container_info_ops = {
+    .proc_open = open_container_info,
     .proc_read = seq_read,
 };
 
-static int __init container_meminfo_init(void) {
-    proc_create(PROC_NAME, 0, NULL, &container_meminfo_ops);
-    printk(KERN_INFO "container_meminfo module loaded\n");
+// Init function to load the module and create the /proc entry
+static int __init container_info_init(void) {
+    proc_create(PROC_ENTRY_NAME, 0, NULL, &container_info_ops);
+    printk(KERN_INFO "Container memory and CPU usage module loaded successfully.\n");
     return 0;
 }
 
-static void __exit container_meminfo_exit(void) {
-    remove_proc_entry(PROC_NAME, NULL);
-    printk(KERN_INFO "container_meminfo module unloaded\n");
+// Exit function to clean up when module is unloaded
+static void __exit container_info_exit(void) {
+    remove_proc_entry(PROC_ENTRY_NAME, NULL);
+    printk(KERN_INFO "Container memory and CPU usage module unloaded.\n");
 }
 
-module_init(container_meminfo_init);
-module_exit(container_meminfo_exit);
+// Function to calculate RSS (Resident Set Size) in KB
+unsigned long calculate_memory_usage(struct task_struct *task) {
+    return task->mm ? get_mm_rss(task->mm) * (PAGE_SIZE / 1024) : 0;
+}
+
+module_init(container_info_init);
+module_exit(container_info_exit);

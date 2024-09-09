@@ -1,0 +1,64 @@
+docker stop $(docker ps -q)
+docker rm $(docker ps -a -q)
+cat /proc/container_info_201903553
+sudo rmmod sysinfo
+sudo insmod sysinfo.ko
+chmod +x ./create_containers.sh
+
+
+
+
+
+alber@raspberrypi:~/Desktop/sopes_p1/rust_service/police $ lscpu
+Architecture:             aarch64
+  CPU op-mode(s):         32-bit, 64-bit
+  Byte Order:             Little Endian
+CPU(s):                   4
+  On-line CPU(s) list:    0-3
+Vendor ID:                ARM
+  Model name:             Cortex-A76
+    Model:                1
+    Thread(s) per core:   1
+    Core(s) per cluster:  4
+    Socket(s):            -
+    Cluster(s):           1
+    Stepping:             r4p1
+    CPU(s) scaling MHz:   67%
+    CPU max MHz:          2400.0000
+    CPU min MHz:          1500.0000
+    BogoMIPS:             108.00
+    Flags:                fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm lrcpc dcpop asimddp
+Caches (sum of all):      
+  L1d:                    256 KiB (4 instances)
+  L1i:                    256 KiB (4 instances)
+  L2:                     2 MiB (4 instances)
+  L3:                     2 MiB (1 instance)
+Vulnerabilities:          
+  Gather data sampling:   Not affected
+  Itlb multihit:          Not affected
+  L1tf:                   Not affected
+  Mds:                    Not affected
+  Meltdown:               Not affected
+  Mmio stale data:        Not affected
+  Reg file data sampling: Not affected
+  Retbleed:               Not affected
+  Spec rstack overflow:   Not affected
+  Spec store bypass:      Mitigation; Speculative Store Bypass disabled via prctl
+  Spectre v1:             Mitigation; __user pointer sanitization
+  Spectre v2:             Mitigation; CSV2, BHB
+  Srbds:                  Not affected
+  Tsx async abort:        Not affected
+alber@raspberrypi:~/Desktop/sopes_p1/rust_service/police $ free -h
+               total        used        free      shared  buff/cache   available
+Mem:           7.9Gi       1.1Gi       5.8Gi        20Mi       1.1Gi       6.8Gi
+Swap:          199Mi          0B       199Mi
+alber@raspberrypi:~/Desktop/sopes_p1/rust_service/police $ df -h
+Filesystem      Size  Used Avail Use% Mounted on
+udev            3.8G     0  3.8G   0% /dev
+tmpfs           806M  5.9M  800M   1% /run
+/dev/mmcblk0p2  115G  7.8G  101G   8% /
+tmpfs           4.0G  288K  4.0G   1% /dev/shm
+tmpfs           5.0M   48K  5.0M   1% /run/lock
+/dev/mmcblk0p1  510M   75M  436M  15% /boot/firmware
+tmpfs           806M  160K  806M   1% /run/user/1000
+alber@raspberrypi:~/Desktop/sopes_p1/rust_service/police $ 

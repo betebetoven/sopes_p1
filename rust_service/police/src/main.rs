@@ -42,8 +42,15 @@ fn main() -> std::io::Result<()> {
     println!("Free RAM: {} KB", parsed_data.system_memory.free_ram);
     println!("Used RAM: {} KB", parsed_data.system_memory.used_ram);
 
-    // Print the container processes with updated memory and CPU usage calculations
-    println!("\nContainer Processes:");
+    // Initialize vectors for high-performance and low-performance containers
+    let mut high_performance_containers = vec![];
+    let mut low_performance_containers = vec![];
+
+    // Threshold for high-performance (adjust based on limits you defined)
+    let high_cpu_threshold = 0.05;  // 25% of a core
+    let high_memory_threshold = 64 * 1024;  // 256MB in KB
+
+    // Analyze each container
     for process in parsed_data.container_processes {
         // Calculate memory usage percentage
         let memory_usage_percent = (process.rss as f64 / parsed_data.system_memory.total_ram as f64) * 100.0;
@@ -51,7 +58,34 @@ fn main() -> std::io::Result<()> {
         // Convert CPU usage from nanoseconds to milliseconds
         let cpu_usage_ms = process.cpu_usage as f64 / 1_000_000.0;
 
-        // Print container process info with formatted memory and CPU usage
+        // Classify as high-performance or low-performance
+        if process.rss >= high_memory_threshold || process.cpu_usage as f64 / 1_000_000_000.0 >= high_cpu_threshold {
+            high_performance_containers.push(process);
+        } else {
+            low_performance_containers.push(process);
+        }
+    }
+
+    // Print high-performance containers
+    println!("\nHigh-Performance Containers (>= 0.25 CPUs or >= 256MB RAM):");
+    for process in &high_performance_containers {
+        let memory_usage_percent = (process.rss as f64 / parsed_data.system_memory.total_ram as f64) * 100.0;
+        let cpu_usage_ms = process.cpu_usage as f64 / 1_000_000.0;
+
+        println!("PID: {}", process.pid);
+        println!("Name: {}", process.name);
+        println!("Vsz: {} KB", process.vsz);
+        println!("Rss: {} KB", process.rss);
+        println!("Memory Usage: {:.2}%", memory_usage_percent);
+        println!("CPU Usage: {:.2} ms\n", cpu_usage_ms);
+    }
+
+    // Print low-performance containers
+    println!("\nLow-Performance Containers (< 0.25 CPUs and < 256MB RAM):");
+    for process in &low_performance_containers {
+        let memory_usage_percent = (process.rss as f64 / parsed_data.system_memory.total_ram as f64) * 100.0;
+        let cpu_usage_ms = process.cpu_usage as f64 / 1_000_000.0;
+
         println!("PID: {}", process.pid);
         println!("Name: {}", process.name);
         println!("Vsz: {} KB", process.vsz);
