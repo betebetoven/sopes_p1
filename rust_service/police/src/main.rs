@@ -1,6 +1,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::process::Command;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use chrono::Local; // For timestamps
 mod docker_manager;
@@ -67,6 +68,17 @@ struct ContainerMemInfo {
     processes: Vec<ContainerProcess>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct MonitoringData {
+    total_memory_kb: u64,
+    free_memory_kb: u64,
+    used_memory_kb: u64,
+    high_performance_containers: Vec<ContainerProcess>,
+    low_performance_containers: Vec<ContainerProcess>,
+    eliminated_containers: Vec<ContainerProcess>,
+    fastapi_container_id: String,
+}
+
 // Function to stop a container
 fn stop_container(container_id: &str) {
     let output = Command::new("docker")
@@ -86,43 +98,6 @@ fn stop_container(container_id: &str) {
     }
 }
 
-// Function to log memory information
-fn log_memory_info(total_memory: u64, free_memory: u64, used_memory: u64) -> std::io::Result<()> {
-    let now = Local::now();
-    let log_entry = format!(
-        "{} - Total Memory: {} KB, Free Memory: {} KB, Used Memory: {} KB\n",
-        now.format("%Y-%m-%d %H:%M:%S"),
-        total_memory,
-        free_memory,
-        used_memory
-    );
-
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("memory_log.txt")?;
-    file.write_all(log_entry.as_bytes())?;
-    Ok(())
-}
-
-// Function to log container process information
-fn log_process_info(container_id: &str, action: &str) -> std::io::Result<()> {
-    let now = Local::now();
-    let log_entry = format!(
-        "{} - Container ID: {} was {}\n",
-        now.format("%Y-%m-%d %H:%M:%S"),
-        container_id,
-        action
-    );
-
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("process_log.txt")?;
-    file.write_all(log_entry.as_bytes())?;
-    Ok(())
-}
-
 fn main() -> std::io::Result<()> {
     // Run FastAPI container and get the container ID
     let fastapi_container_id = docker_manager::run_fastapi_container()?;
@@ -137,14 +112,12 @@ fn main() -> std::io::Result<()> {
     // Parse the JSON data
     let parsed_data: ContainerMemInfo = serde_json::from_str(&mut contents).expect("Failed to parse JSON");
 
-    // Print and log system memory information
+    // Print system memory information
     println!("====== System Memory Information ======");
     println!("Total RAM: {} KB", parsed_data.total_memory_kb);
     println!("Free RAM: {} KB", parsed_data.free_memory_kb);
     println!("Used RAM: {} KB", parsed_data.used_memory_kb);
     
-    log_memory_info(parsed_data.total_memory_kb, parsed_data.free_memory_kb, parsed_data.used_memory_kb)?;
-
     // Initialize vectors for low-performance and high-performance containers
     let mut low_performance_containers = vec![];
     let mut high_performance_containers = vec![];
@@ -175,7 +148,6 @@ fn main() -> std::io::Result<()> {
         let excess_high_performance = &high_performance_containers[2..];
         for process in excess_high_performance {
             stop_container(&process.container_id);
-            log_process_info(&process.container_id, "stopped")?;
             eliminated_containers.push(process.clone());
         }
         high_performance_containers.truncate(2);
@@ -185,7 +157,6 @@ fn main() -> std::io::Result<()> {
         let excess_low_performance = &low_performance_containers[3..];
         for process in excess_low_performance {
             stop_container(&process.container_id);
-            log_process_info(&process.container_id, "stopped")?;
             eliminated_containers.push(process.clone());
         }
         low_performance_containers.truncate(3);
@@ -233,5 +204,41 @@ fn main() -> std::io::Result<()> {
     println!("\n====== Side Service: FastAPI Container ======");
     println!("FastAPI Container ID: {}", fastapi_container_id);
 
+    // Prepare data to send to FastAPI
+    let monitoring_data = MonitoringData {
+        total_memory_kb: parsed_data.total_memory_kb,
+        free_memory_kb: parsed_data.free_memory_kb,
+        used_memory_kb: parsed_data.used_memory_kb,
+        high_performance_containers,
+        low_performance_containers,
+        eliminated_containers,
+        fastapi_container_id,
+    };
+
+    // Serialize monitoring data to JSON
+    let json_data = serde_json::to_string(&monitoring_data).expect("Failed to serialize monitoring data");
+
+    // Send the data to the FastAPI server
+    let client = Client::new();
+    let response = client
+        .post("http://localhost:8000/log")
+        .header("Content-Type", "application/json")
+        .body(json_data)
+        .send();
+
+    match response {
+        Ok(res) => {
+            if res.status().is_success() {
+                println!("Successfully sent monitoring data to FastAPI server.");
+            } else {
+                println!("Failed to send monitoring data. Server responded with status: {}", res.status());
+            }
+        }
+        Err(e) => {
+            println!("Error sending monitoring data to FastAPI server: {}", e);
+        }
+    }
+
     Ok(())
 }
+

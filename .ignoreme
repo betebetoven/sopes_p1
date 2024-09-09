@@ -9,6 +9,10 @@ docker build -t high_ram_container .
 docker build -t low_consumption_container .
 
 
+docker build -t fastapi-server .
+docker run -d -p 8000:8000 fastapi-server
+curl http://localhost:8000/
+
 
 
 alber@raspberrypi:~/Desktop/sopes_p1/rust_service/police $ lscpu
