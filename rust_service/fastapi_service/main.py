@@ -1,14 +1,36 @@
-from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import HTMLResponse
-from typing import Dict
+from fastapi import FastAPI, Request, WebSocket, Depends
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, FileResponse
+from typing import List, Dict
 import json
+import asyncio
 
 app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Global variable to store logs
-global_data = {"logs": []}
+class LogManager:
+    def __init__(self):
+        self.logs: List[Dict] = []
+        self.websockets: List[WebSocket] = []
 
-# HTML content to display on the root endpoint
+    async def add_log(self, log: Dict):
+        self.logs.append(log)
+        await self.broadcast(log)
+
+    async def broadcast(self, message: Dict):
+        for websocket in self.websockets:
+            await websocket.send_text(json.dumps(message))
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.websockets.append(websocket)
+        await websocket.send_text(json.dumps({"type": "history", "logs": self.logs}))
+
+    def disconnect(self, websocket: WebSocket):
+        self.websockets.remove(websocket)
+
+log_manager = LogManager()
+
 html_content = """
 <!DOCTYPE html>
 <html>
@@ -24,7 +46,7 @@ html_content = """
             ws.onmessage = function(event) {
                 var dataDiv = document.getElementById("data");
                 var newData = document.createElement("p");
-                newData.textContent = event.data;
+                newData.textContent = JSON.stringify(JSON.parse(event.data), null, 2);
                 dataDiv.appendChild(newData);
             };
         </script>
@@ -34,25 +56,23 @@ html_content = """
 
 @app.get("/", response_class=HTMLResponse)
 async def get_html():
-    # Return the HTML page
-    return html_content
+    return FileResponse("static/dashboard.html")
 
 @app.get("/hello")
 async def say_hello(name: str):
     return {"message": f"Hello, {name}!"}
 
 @app.post("/log")
-async def receive_log(request: Request):
-    # Receive the data and store it in the global dictionary
+async def receive_log(request: Request, log_manager: LogManager = Depends(lambda: log_manager)):
     data = await request.json()
-    global_data["logs"].append(data)
-    print("Received data:", data)  # Process the data here
+    await log_manager.add_log(data)
     return {"message": "Data received successfully"}
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    while True:
-        # Continuously send the updated logs to the client
-        await websocket.send_text(json.dumps(global_data["logs"]))
-        await asyncio.sleep(2)  # Send updates every 2 seconds
+async def websocket_endpoint(websocket: WebSocket, log_manager: LogManager = Depends(lambda: log_manager)):
+    await log_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # Keep the connection alive
+    except:
+        log_manager.disconnect(websocket)

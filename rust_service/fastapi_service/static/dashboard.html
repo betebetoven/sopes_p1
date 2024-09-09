@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Docker Monitoring Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold mb-8 text-gray-800">Docker Monitoring Dashboard</h1>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-2 text-gray-700">Total Memory</h2>
+                <p class="text-3xl font-bold text-blue-600" id="totalMemory">-</p>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-2 text-gray-700">Used Memory</h2>
+                <p class="text-3xl font-bold text-red-600" id="usedMemory">-</p>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-2 text-gray-700">Free Memory</h2>
+                <p class="text-3xl font-bold text-green-600" id="freeMemory">-</p>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-2 text-gray-700">Active Containers</h2>
+                <p class="text-3xl font-bold text-purple-600" id="activeContainers">-</p>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-6 mb-8">
+            <h2 class="text-2xl font-semibold mb-4 text-gray-800">Memory Usage Over Time</h2>
+            <canvas id="memoryChart"></canvas>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div>
+                <h2 class="text-2xl font-semibold mb-4 text-gray-800">High Performance Containers</h2>
+                <div id="highPerformanceContainers"></div>
+            </div>
+            <div>
+                <h2 class="text-2xl font-semibold mb-4 text-gray-800">Low Performance Containers</h2>
+                <div id="lowPerformanceContainers"></div>
+            </div>
+            <div>
+                <h2 class="text-2xl font-semibold mb-4 text-gray-800">Eliminated Containers</h2>
+                <div id="eliminatedContainers"></div>
+            </div>
+        </div>
+
+        <div class="mt-8 bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 rounded" id="fastapiContainer">
+            <p class="font-bold">FastAPI Container ID:</p>
+            <p id="fastapiContainerId">-</p>
+        </div>
+    </div>
+
+    <script>
+        const ws = new WebSocket("ws://localhost:8000/ws");
+        const ctx = document.getElementById('memoryChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Used Memory',
+                    borderColor: 'rgb(255, 99, 132)',
+                    data: []
+                }, {
+                    label: 'Free Memory',
+                    borderColor: 'rgb(75, 192, 192)',
+                    data: []
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: {
+                        type: 'linear',
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+        function updateContainers(containerId, containers) {
+            const containerDiv = document.getElementById(containerId);
+            containerDiv.innerHTML = '';
+            containers.forEach(container => {
+                const containerCard = document.createElement('div');
+                containerCard.className = 'bg-white rounded-lg shadow p-4 mb-4';
+                containerCard.innerHTML = `
+                    <h3 class="font-semibold text-lg mb-2">${container.process_name} (${container.container_id.slice(0, 8)})</h3>
+                    <p class="text-sm text-gray-600">CPU Usage: ${container.cpu_usage_percent.toFixed(2)}%</p>
+                    <p class="text-sm text-gray-600">Memory: ${formatBytes(container.rss_kb * 1024)} (${container.memory_usage_percent.toFixed(2)}%)</p>
+                `;
+                containerDiv.appendChild(containerCard);
+            });
+        }
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.type === 'history') {
+                // Handle historical data
+                data.logs.forEach(updateDashboard);
+            } else {
+                updateDashboard(data);
+            }
+        };
+
+        function updateDashboard(data) {
+            document.getElementById('totalMemory').textContent = formatBytes(data.total_memory_kb * 1024);
+            document.getElementById('usedMemory').textContent = formatBytes(data.used_memory_kb * 1024);
+            document.getElementById('freeMemory').textContent = formatBytes(data.free_memory_kb * 1024);
+            document.getElementById('activeContainers').textContent = 
+                data.high_performance_containers.length + data.low_performance_containers.length;
+
+            updateContainers('highPerformanceContainers', data.high_performance_containers);
+            updateContainers('lowPerformanceContainers', data.low_performance_containers);
+            updateContainers('eliminatedContainers', data.eliminated_containers);
+
+            document.getElementById('fastapiContainerId').textContent = data.fastapi_container_id;
+
+            // Update chart
+            const timestamp = new Date().getTime();
+            chart.data.labels.push(timestamp);
+            chart.data.datasets[0].data.push(data.used_memory_kb);
+            chart.data.datasets[1].data.push(data.free_memory_kb);
+
+            // Keep only last 20 data points
+            if (chart.data.labels.length > 20) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+                chart.data.datasets[1].data.shift();
+            }
+            chart.update();
+        }
+    </script>
+</body>
+</html>
