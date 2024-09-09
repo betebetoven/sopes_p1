@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use chrono::Local; // For timestamps
 mod docker_manager;
 
-
 // Helper function to deserialize strings to u64
 fn deserialize_from_str<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where
@@ -70,7 +69,6 @@ struct ContainerMemInfo {
 
 // Function to stop a container
 fn stop_container(container_id: &str) {
-    // Command to stop the container using its ID
     let output = Command::new("docker")
         .arg("stop")
         .arg(container_id)
@@ -126,7 +124,9 @@ fn log_process_info(container_id: &str, action: &str) -> std::io::Result<()> {
 }
 
 fn main() -> std::io::Result<()> {
-    docker_manager::run_fastapi_container()?;
+    // Run FastAPI container and get the container ID
+    let fastapi_container_id = docker_manager::run_fastapi_container()?;
+
     // Open the file
     let mut file = File::open("/proc/container_info_201903553")?;
     let mut contents = String::new();
@@ -152,6 +152,11 @@ fn main() -> std::io::Result<()> {
 
     // Analyze each container based on CPU and memory usage
     for process in &parsed_data.processes {
+        // Ensure FastAPI container is skipped in performance analysis
+        if process.container_id == fastapi_container_id {
+            continue;
+        }
+
         if process.cpu_usage_percent == 0.00 {
             low_performance_containers.push(process.clone());
         } else if process.cpu_usage_percent <= 0.09 && process.memory_usage_percent <= 0.16 {
@@ -223,6 +228,10 @@ fn main() -> std::io::Result<()> {
             println!("CPU Usage: {:.2}%\n", process.cpu_usage_percent);
         }
     }
+
+    // Print FastAPI container as a side service
+    println!("\n====== Side Service: FastAPI Container ======");
+    println!("FastAPI Container ID: {}", fastapi_container_id);
 
     Ok(())
 }

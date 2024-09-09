@@ -3,8 +3,8 @@ use std::io::{self};
 use std::thread;
 use std::time::Duration;
 
-pub fn run_fastapi_container() -> io::Result<()> {
-    // Run the FastAPI Docker container
+pub fn run_fastapi_container() -> io::Result<String> {
+    // Run the FastAPI Docker container and capture the container ID
     let output = Command::new("docker")
         .arg("run")
         .arg("-d")
@@ -15,7 +15,9 @@ pub fn run_fastapi_container() -> io::Result<()> {
         .expect("Failed to start FastAPI Docker container");
 
     if output.status.success() {
-        println!("Successfully started FastAPI container");
+        let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        println!("Successfully started FastAPI container with ID: {}", container_id);
+        return Ok(container_id);  // Fixed by adding return here
     } else {
         eprintln!(
             "Error starting FastAPI container: {}",
@@ -58,5 +60,5 @@ pub fn run_fastapi_container() -> io::Result<()> {
         return Err(io::Error::new(io::ErrorKind::Other, "Failed to connect to FastAPI server"));
     }
 
-    Ok(())
+    Ok("".to_string())
 }
