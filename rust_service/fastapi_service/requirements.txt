@@ -1,2 +1,6 @@
 fastapi==0.95.2
 uvicorn==0.22.0
+websockets==11.0.3  # WebSocket support
+asyncio==3.4.3  # For managing asynchronous tasks
+pydantic==1.10.7  # For data validation and parsing
+loguru==0.7.0  # For advanced logging (optional, but useful)
