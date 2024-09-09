@@ -11,8 +11,6 @@ Module.symvers
 /target/
 /Cargo.lock
 
-# Ignore Docker build files
-Docker_files
 
 # Ignore system files
 .DS_Store
