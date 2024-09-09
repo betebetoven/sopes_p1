@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::Read;
+use std::process::Command;
 use serde::{Deserialize, Serialize};
 
 // Helper function to deserialize strings to u64
@@ -29,19 +30,7 @@ where
     s.parse::<f64>().map_err(serde::de::Error::custom)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct SystemMemory {
-    #[serde(deserialize_with = "deserialize_from_str")]
-    total_memory_kb: u64,
-    
-    #[serde(deserialize_with = "deserialize_from_str")]
-    free_memory_kb: u64,
-    
-    #[serde(deserialize_with = "deserialize_from_str")]
-    used_memory_kb: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct ContainerProcess {
     #[serde(deserialize_with = "deserialize_from_str_u32")]
     pid: u32,
@@ -76,6 +65,25 @@ struct ContainerMemInfo {
     processes: Vec<ContainerProcess>,
 }
 
+fn stop_container(container_id: &str) {
+    // Command to stop the container using its ID
+    let output = Command::new("docker")
+        .arg("stop")
+        .arg(container_id)
+        .output()
+        .expect("Failed to execute docker stop");
+
+    if output.status.success() {
+        println!("Successfully stopped container with ID: {}", container_id);
+    } else {
+        eprintln!(
+            "Failed to stop container with ID: {}. Error: {}",
+            container_id,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
 fn main() -> std::io::Result<()> {
     // Open the file
     let mut file = File::open("/proc/container_info_201903553")?;
@@ -99,20 +107,38 @@ fn main() -> std::io::Result<()> {
 
     // Analyze each container based on CPU and memory usage
     for process in &parsed_data.processes {
-        // Identify low-performance containers (CPU usage <= 0.02% or memory usage <= 0.14%)
-        // if process.cpu_usage_percent == 0.00 then put it in low_performance_containers
         if process.cpu_usage_percent == 0.00 {
-            low_performance_containers.push(process);
-        } else
-        if process.cpu_usage_percent <= 0.09 && process.memory_usage_percent <= 0.16 {
-            low_performance_containers.push(process);
+            low_performance_containers.push(process.clone());
+        } else if process.cpu_usage_percent <= 0.09 && process.memory_usage_percent <= 0.16 {
+            low_performance_containers.push(process.clone());
         } else {
-            high_performance_containers.push(process);
+            high_performance_containers.push(process.clone());
         }
     }
 
+    // Sort the containers by CPU usage (you can modify this to sort by memory, VSZ, or RSS)
+    low_performance_containers.sort_by(|a, b| b.cpu_usage_percent.partial_cmp(&a.cpu_usage_percent).unwrap());
+    high_performance_containers.sort_by(|a, b| b.cpu_usage_percent.partial_cmp(&a.cpu_usage_percent).unwrap());
+
+    // Limit to 2 high-performance containers and 3 low-performance containers
+    if high_performance_containers.len() > 2 {
+        let excess_high_performance = &high_performance_containers[2..];
+        for process in excess_high_performance {
+            stop_container(&process.container_id);
+        }
+        high_performance_containers.truncate(2);
+    }
+
+    if low_performance_containers.len() > 3 {
+        let excess_low_performance = &low_performance_containers[3..];
+        for process in excess_low_performance {
+            stop_container(&process.container_id);
+        }
+        low_performance_containers.truncate(3);
+    }
+
     // Print low-performance containers
-    println!("\nLow-Performance Containers (CPU usage <= 0.02% or Memory usage <= 0.14%):");
+    println!("\nSelected Low-Performance Containers (Max 3):");
     for process in &low_performance_containers {
         println!("PID: {}", process.pid);
         println!("Name: {}", process.process_name);
@@ -124,7 +150,7 @@ fn main() -> std::io::Result<()> {
     }
 
     // Print high-performance containers
-    println!("\nHigh-Performance Containers (CPU usage > 0.02% and Memory usage > 0.14%):");
+    println!("\nSelected High-Performance Containers (Max 2):");
     for process in &high_performance_containers {
         println!("PID: {}", process.pid);
         println!("Name: {}", process.process_name);
