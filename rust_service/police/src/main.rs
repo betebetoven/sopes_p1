@@ -2,64 +2,120 @@ use std::fs::File;
 use std::io::Read;
 use serde::{Deserialize, Serialize};
 
+// Helper function to deserialize strings to u64
+fn deserialize_from_str<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    s.parse::<u64>().map_err(serde::de::Error::custom)
+}
+
+// Helper function to deserialize strings to u32
+fn deserialize_from_str_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    s.parse::<u32>().map_err(serde::de::Error::custom)
+}
+
+// Helper function to deserialize strings to f64
+fn deserialize_from_str_f64<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    s.parse::<f64>().map_err(serde::de::Error::custom)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct SystemMemory {
-    total_ram: u64,
-    free_ram: u64,
-    used_ram: u64,
+    #[serde(deserialize_with = "deserialize_from_str")]
+    total_memory_kb: u64,
+    
+    #[serde(deserialize_with = "deserialize_from_str")]
+    free_memory_kb: u64,
+    
+    #[serde(deserialize_with = "deserialize_from_str")]
+    used_memory_kb: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ContainerProcess {
+    #[serde(deserialize_with = "deserialize_from_str_u32")]
     pid: u32,
-    name: String,
-    vsz: u64,
-    rss: u64,
-    memory_usage: u64,
-    cpu_usage: u64,
+    
+    process_name: String,
+    container_id: String,
+    
+    #[serde(deserialize_with = "deserialize_from_str")]
+    vsz_kb: u64,
+    
+    #[serde(deserialize_with = "deserialize_from_str")]
+    rss_kb: u64,
+    
+    #[serde(deserialize_with = "deserialize_from_str_f64")]
+    memory_usage_percent: f64,
+    
+    #[serde(deserialize_with = "deserialize_from_str_f64")]
+    cpu_usage_percent: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ContainerMemInfo {
-    system_memory: SystemMemory,
-    container_processes: Vec<ContainerProcess>,
+    #[serde(deserialize_with = "deserialize_from_str")]
+    total_memory_kb: u64,
+    
+    #[serde(deserialize_with = "deserialize_from_str")]
+    free_memory_kb: u64,
+    
+    #[serde(deserialize_with = "deserialize_from_str")]
+    used_memory_kb: u64,
+    
+    processes: Vec<ContainerProcess>,
 }
 
 fn main() -> std::io::Result<()> {
     // Open the file
-    let mut file = File::open("/proc/container_meminfo")?;
+    let mut file = File::open("/proc/container_info_201903553")?;
     let mut contents = String::new();
     
     // Read the file contents into a string
     file.read_to_string(&mut contents)?;
     
     // Parse the JSON data
-    let parsed_data: ContainerMemInfo = serde_json::from_str(&contents).expect("Failed to parse JSON");
+    let parsed_data: ContainerMemInfo = serde_json::from_str(&mut contents).expect("Failed to parse JSON");
 
     // Print the system memory information
     println!("System Memory Information:");
-    println!("Total RAM: {} KB", parsed_data.system_memory.total_ram);
-    println!("Free RAM: {} KB", parsed_data.system_memory.free_ram);
-    println!("Used RAM: {} KB", parsed_data.system_memory.used_ram);
+    println!("Total RAM: {} KB", parsed_data.total_memory_kb);
+    println!("Free RAM: {} KB", parsed_data.free_memory_kb);
+    println!("Used RAM: {} KB", parsed_data.used_memory_kb);
 
     // Initialize vectors for high-performance and low-performance containers
     let mut high_performance_containers = vec![];
     let mut low_performance_containers = vec![];
 
-    // Threshold for high-performance (adjust based on limits you defined)
-    let high_cpu_threshold = 0.05;  // 25% of a core
-    let high_memory_threshold = 64 * 1024;  // 256MB in KB
+    // Refined performance analysis criteria
+    let total_memory_kb = parsed_data.total_memory_kb as f64;
+    let total_cpu_percent = 100.0;  // Assuming 100% CPU power for simplicity
 
     // Analyze each container
-    for process in parsed_data.container_processes {
-        // Calculate memory usage percentage
-        let memory_usage_percent = (process.rss as f64 / parsed_data.system_memory.total_ram as f64) * 100.0;
+    for process in &parsed_data.processes {
+        // Calculate memory usage as a percentage of total system memory
+        let memory_usage_relative = (process.rss_kb as f64 / total_memory_kb) * 100.0;
 
-        // Convert CPU usage from nanoseconds to milliseconds
-        let cpu_usage_ms = process.cpu_usage as f64 / 1_000_000.0;
+        // Calculate a memory-to-CPU ratio
+        let memory_to_cpu_ratio = if process.cpu_usage_percent > 0.0 {
+            memory_usage_relative / process.cpu_usage_percent
+        } else {
+            std::f64::MAX  // If no CPU usage, consider it as a high memory-to-CPU ratio
+        };
 
-        // Classify as high-performance or low-performance
-        if process.rss >= high_memory_threshold || process.cpu_usage as f64 / 1_000_000_000.0 >= high_cpu_threshold {
+        // Refined conditions for high-performance containers:
+        // High memory-to-CPU ratio means the container is consuming more memory relative to CPU.
+        if process.cpu_usage_percent > 0.20 || memory_to_cpu_ratio < 2.0 {
             high_performance_containers.push(process);
         } else {
             low_performance_containers.push(process);
@@ -67,31 +123,27 @@ fn main() -> std::io::Result<()> {
     }
 
     // Print high-performance containers
-    println!("\nHigh-Performance Containers (>= 0.25 CPUs or >= 256MB RAM):");
+    println!("\nHigh-Performance Containers (High CPU or High memory-to-CPU efficiency):");
     for process in &high_performance_containers {
-        let memory_usage_percent = (process.rss as f64 / parsed_data.system_memory.total_ram as f64) * 100.0;
-        let cpu_usage_ms = process.cpu_usage as f64 / 1_000_000.0;
-
         println!("PID: {}", process.pid);
-        println!("Name: {}", process.name);
-        println!("Vsz: {} KB", process.vsz);
-        println!("Rss: {} KB", process.rss);
-        println!("Memory Usage: {:.2}%", memory_usage_percent);
-        println!("CPU Usage: {:.2} ms\n", cpu_usage_ms);
+        println!("Name: {}", process.process_name);
+        println!("Container ID: {}", process.container_id);
+        println!("Vsz: {} KB", process.vsz_kb);
+        println!("Rss: {} KB", process.rss_kb);
+        println!("Memory Usage: {:.2}% of system", process.memory_usage_percent);
+        println!("CPU Usage: {:.2}%\n", process.cpu_usage_percent);
     }
 
     // Print low-performance containers
-    println!("\nLow-Performance Containers (< 0.25 CPUs and < 256MB RAM):");
+    println!("\nLow-Performance Containers (Low CPU and low memory-to-CPU efficiency):");
     for process in &low_performance_containers {
-        let memory_usage_percent = (process.rss as f64 / parsed_data.system_memory.total_ram as f64) * 100.0;
-        let cpu_usage_ms = process.cpu_usage as f64 / 1_000_000.0;
-
         println!("PID: {}", process.pid);
-        println!("Name: {}", process.name);
-        println!("Vsz: {} KB", process.vsz);
-        println!("Rss: {} KB", process.rss);
-        println!("Memory Usage: {:.2}%", memory_usage_percent);
-        println!("CPU Usage: {:.2} ms\n", cpu_usage_ms);
+        println!("Name: {}", process.process_name);
+        println!("Container ID: {}", process.container_id);
+        println!("Vsz: {} KB", process.vsz_kb);
+        println!("Rss: {} KB", process.rss_kb);
+        println!("Memory Usage: {:.2}% of system", process.memory_usage_percent);
+        println!("CPU Usage: {:.2}%\n", process.cpu_usage_percent);
     }
 
     Ok(())
