@@ -1,7 +1,10 @@
-use std::fs::File;
-use std::io::Read;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
 use std::process::Command;
 use serde::{Deserialize, Serialize};
+use chrono::Local; // For timestamps
+mod docker_manager;
+
 
 // Helper function to deserialize strings to u64
 fn deserialize_from_str<'de, D>(deserializer: D) -> Result<u64, D::Error>
@@ -65,6 +68,7 @@ struct ContainerMemInfo {
     processes: Vec<ContainerProcess>,
 }
 
+// Function to stop a container
 fn stop_container(container_id: &str) {
     // Command to stop the container using its ID
     let output = Command::new("docker")
@@ -84,7 +88,45 @@ fn stop_container(container_id: &str) {
     }
 }
 
+// Function to log memory information
+fn log_memory_info(total_memory: u64, free_memory: u64, used_memory: u64) -> std::io::Result<()> {
+    let now = Local::now();
+    let log_entry = format!(
+        "{} - Total Memory: {} KB, Free Memory: {} KB, Used Memory: {} KB\n",
+        now.format("%Y-%m-%d %H:%M:%S"),
+        total_memory,
+        free_memory,
+        used_memory
+    );
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("memory_log.txt")?;
+    file.write_all(log_entry.as_bytes())?;
+    Ok(())
+}
+
+// Function to log container process information
+fn log_process_info(container_id: &str, action: &str) -> std::io::Result<()> {
+    let now = Local::now();
+    let log_entry = format!(
+        "{} - Container ID: {} was {}\n",
+        now.format("%Y-%m-%d %H:%M:%S"),
+        container_id,
+        action
+    );
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("process_log.txt")?;
+    file.write_all(log_entry.as_bytes())?;
+    Ok(())
+}
+
 fn main() -> std::io::Result<()> {
+    docker_manager::run_fastapi_container()?;
     // Open the file
     let mut file = File::open("/proc/container_info_201903553")?;
     let mut contents = String::new();
@@ -95,15 +137,18 @@ fn main() -> std::io::Result<()> {
     // Parse the JSON data
     let parsed_data: ContainerMemInfo = serde_json::from_str(&mut contents).expect("Failed to parse JSON");
 
-    // Print the system memory information
-    println!("System Memory Information:");
+    // Print and log system memory information
+    println!("====== System Memory Information ======");
     println!("Total RAM: {} KB", parsed_data.total_memory_kb);
     println!("Free RAM: {} KB", parsed_data.free_memory_kb);
     println!("Used RAM: {} KB", parsed_data.used_memory_kb);
+    
+    log_memory_info(parsed_data.total_memory_kb, parsed_data.free_memory_kb, parsed_data.used_memory_kb)?;
 
     // Initialize vectors for low-performance and high-performance containers
     let mut low_performance_containers = vec![];
     let mut high_performance_containers = vec![];
+    let mut eliminated_containers = vec![];
 
     // Analyze each container based on CPU and memory usage
     for process in &parsed_data.processes {
@@ -125,6 +170,8 @@ fn main() -> std::io::Result<()> {
         let excess_high_performance = &high_performance_containers[2..];
         for process in excess_high_performance {
             stop_container(&process.container_id);
+            log_process_info(&process.container_id, "stopped")?;
+            eliminated_containers.push(process.clone());
         }
         high_performance_containers.truncate(2);
     }
@@ -133,12 +180,26 @@ fn main() -> std::io::Result<()> {
         let excess_low_performance = &low_performance_containers[3..];
         for process in excess_low_performance {
             stop_container(&process.container_id);
+            log_process_info(&process.container_id, "stopped")?;
+            eliminated_containers.push(process.clone());
         }
         low_performance_containers.truncate(3);
     }
 
+    // Print high-performance containers
+    println!("\n====== High-Performance Containers (Max 2) ======");
+    for process in &high_performance_containers {
+        println!("PID: {}", process.pid);
+        println!("Name: {}", process.process_name);
+        println!("Container ID: {}", process.container_id);
+        println!("Vsz: {} KB", process.vsz_kb);
+        println!("Rss: {} KB", process.rss_kb);
+        println!("Memory Usage: {:.2}% of system", process.memory_usage_percent);
+        println!("CPU Usage: {:.2}%\n", process.cpu_usage_percent);
+    }
+
     // Print low-performance containers
-    println!("\nSelected Low-Performance Containers (Max 3):");
+    println!("\n====== Low-Performance Containers (Max 3) ======");
     for process in &low_performance_containers {
         println!("PID: {}", process.pid);
         println!("Name: {}", process.process_name);
@@ -149,16 +210,18 @@ fn main() -> std::io::Result<()> {
         println!("CPU Usage: {:.2}%\n", process.cpu_usage_percent);
     }
 
-    // Print high-performance containers
-    println!("\nSelected High-Performance Containers (Max 2):");
-    for process in &high_performance_containers {
-        println!("PID: {}", process.pid);
-        println!("Name: {}", process.process_name);
-        println!("Container ID: {}", process.container_id);
-        println!("Vsz: {} KB", process.vsz_kb);
-        println!("Rss: {} KB", process.rss_kb);
-        println!("Memory Usage: {:.2}% of system", process.memory_usage_percent);
-        println!("CPU Usage: {:.2}%\n", process.cpu_usage_percent);
+    // Print eliminated containers
+    if !eliminated_containers.is_empty() {
+        println!("\n====== Eliminated Containers ======");
+        for process in &eliminated_containers {
+            println!("PID: {}", process.pid);
+            println!("Name: {}", process.process_name);
+            println!("Container ID: {}", process.container_id);
+            println!("Vsz: {} KB", process.vsz_kb);
+            println!("Rss: {} KB", process.rss_kb);
+            println!("Memory Usage: {:.2}% of system", process.memory_usage_percent);
+            println!("CPU Usage: {:.2}%\n", process.cpu_usage_percent);
+        }
     }
 
     Ok(())
