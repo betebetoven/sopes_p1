@@ -103,9 +103,25 @@ fn stop_container(container_id: &str) {
     }
 }
 
+fn generate_graphs(fastapi_url: &str) -> Result<(), reqwest::Error> {
+    let client = Client::new();
+    let url = format!("{}/generate-graphs", fastapi_url);
+
+    // Send the GET request to generate the graphs
+    let response = client.get(&url).send()?;
+
+    if response.status().is_success() {
+        println!("Graphs generated successfully.");
+    } else {
+        println!("Failed to generate graphs. Status: {}", response.status());
+    }
+
+    Ok(())
+}
+
 fn main() -> std::io::Result<()> {
     let fastapi_container_id = docker_manager::run_fastapi_container()?;
-    
+    let fastapi_url = "http://localhost:8000"; 
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
     
@@ -220,9 +236,12 @@ fn main() -> std::io::Result<()> {
 
         thread::sleep(Duration::from_secs(10));
     }
-
+    match generate_graphs(fastapi_url) {
+        Ok(_) => println!("Graph generation complete."),
+        Err(e) => println!("Error generating graphs: {}", e),
+    }
     println!("Shutting down FastAPI container...");
-    stop_container(&fastapi_container_id);
+    stop_container(&fastapi_container_id); 
     println!("FastAPI container stopped.");
     exit(0);
 }
