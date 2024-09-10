@@ -10,7 +10,7 @@ Module.symvers
 # Ignore Rust build files
 /target/
 /Cargo.lock
-
+/shared_data
 
 # Ignore system files
 .DS_Store

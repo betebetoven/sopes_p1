@@ -10,10 +10,13 @@ pub fn run_fastapi_container() -> io::Result<String> {
         .arg("-d")
         .arg("-p")
         .arg("8000:8000")
+        .arg("--name")
+        .arg("fastapi-server")
+        .arg("-v")
+        .arg("/home/alber/Desktop/sopes_p1/shared_data:/app/shared")
         .arg("fastapi-server")
         .output()
         .expect("Failed to start FastAPI Docker container");
-
     if output.status.success() {
         let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
         println!("Successfully started FastAPI container with ID: {}", container_id);

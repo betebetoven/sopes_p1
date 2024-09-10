@@ -1,3 +1,5 @@
+numpy<2.0
+matplotlib==3.7.1
 fastapi==0.95.2
 uvicorn==0.22.0
 websockets==11.0.3  # WebSocket support

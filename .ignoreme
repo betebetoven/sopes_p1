@@ -11,8 +11,15 @@ docker build -t low_consumption_container .
 
 docker build -t fastapi-server .
 docker run -d -p 8000:8000 fastapi-server
+docker run -d -p 8000:8000 --name fastapi-server -v /home/alber/Desktop/sopes_p1/shared_data:/app/shared fastapi-server
+docker logs -f fastapi-server
+docker exec -it fastapi-server /bin/bash
+
 curl http://localhost:8000/
 
+docker dns problem
+sudo nano /etc/resolv.conf
+nameserver 8.8.8.8
 
 
 alber@raspberrypi:~/Desktop/sopes_p1/rust_service/police $ lscpu
