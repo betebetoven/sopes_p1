@@ -97,36 +97,60 @@ async def websocket_endpoint(websocket: WebSocket, log_manager: LogManager = Dep
 
 # Generate graphs from the logs
 @app.get("/generate-graphs")
-async def generate_graphs(log_manager: LogManager = Depends(lambda: log_manager)):
-    if not log_manager.logs:
+async def generate_graphs():
+    LOG_FILE_PATH = "/app/shared/logs.json"  # Shared volume path for logs
+
+    # Check if the log file exists
+    if not os.path.exists(LOG_FILE_PATH):
+        return {"message": "No logs file available to generate graphs"}
+
+    # Load the logs from the JSON file
+    with open(LOG_FILE_PATH, "r") as file:
+        logs = json.load(file)
+
+    if not logs:
         return {"message": "No logs available to generate graphs"}
 
-    # Example data extraction (memory and CPU usage)
-    memory_usage = [log["memory_usage"] for log in log_manager.logs if "memory_usage" in log]
-    cpu_usage = [log["cpu_usage"] for log in log_manager.logs if "cpu_usage" in log]
-    timestamps = [log["timestamp"] for log in log_manager.logs if "timestamp" in log]
+    # Example data extraction (high-performance and low-performance memory and CPU usage)
+    timestamps = list(range(len(logs)))  # Use log entry indices as timestamps since we don't have actual timestamps
 
-    # Plot memory usage
+    high_mem_usage = []
+    low_mem_usage = []
+    high_cpu_usage = []
+    low_cpu_usage = []
+
+    # Iterate over logs to gather memory and CPU usage data from high- and low-performance containers
+    for log in logs:
+        high_mem_usage.append(sum([container['memory_usage_percent'] for container in log['high_performance_containers']]))
+        low_mem_usage.append(sum([container['memory_usage_percent'] for container in log['low_performance_containers']]))
+        high_cpu_usage.append(sum([container['cpu_usage_percent'] for container in log['high_performance_containers']]))
+        low_cpu_usage.append(sum([container['cpu_usage_percent'] for container in log['low_performance_containers']]))
+
+    # Plot memory usage (high and low performance containers)
     plt.figure(figsize=(10, 5))
-    plt.plot(timestamps, memory_usage, label="Memory Usage", color="blue")
-    plt.xlabel("Timestamp")
+    plt.plot(timestamps, high_mem_usage, label="High Performance Memory Usage", color="blue", linestyle='--')
+    plt.plot(timestamps, low_mem_usage, label="Low Performance Memory Usage", color="cyan", linestyle='-.')
+    plt.xlabel("Log Entry (Time)")
     plt.ylabel("Memory Usage (%)")
-    plt.title("Memory Usage Over Time")
+    plt.title("Memory Usage Over Time (High vs Low Performance Containers)")
     plt.legend()
+    plt.grid(True)
     plt.xticks(rotation=45)
-    memory_graph_path = "/app/shared/memory_usage.png"  # Save in the shared volume
+    memory_graph_path = "/app/shared/memory_usage.png"
     plt.savefig(memory_graph_path)
     plt.close()
 
-    # Plot CPU usage
+    # Plot CPU usage (high and low performance containers)
     plt.figure(figsize=(10, 5))
-    plt.plot(timestamps, cpu_usage, label="CPU Usage", color="green")
-    plt.xlabel("Timestamp")
+    plt.plot(timestamps, high_cpu_usage, label="High Performance CPU Usage", color="green", linestyle='--')
+    plt.plot(timestamps, low_cpu_usage, label="Low Performance CPU Usage", color="lime", linestyle='-.')
+    plt.xlabel("Log Entry (Time)")
     plt.ylabel("CPU Usage (%)")
-    plt.title("CPU Usage Over Time")
+    plt.title("CPU Usage Over Time (High vs Low Performance Containers)")
     plt.legend()
+    plt.grid(True)
     plt.xticks(rotation=45)
-    cpu_graph_path = "/app/shared/cpu_usage.png"  # Save in the shared volume
+    cpu_graph_path = "/app/shared/cpu_usage.png"
     plt.savefig(cpu_graph_path)
     plt.close()
 
