@@ -119,7 +119,28 @@ fn generate_graphs(fastapi_url: &str) -> Result<(), reqwest::Error> {
     Ok(())
 }
 
+fn start_cronjob() -> std::io::Result<()> {
+    Command::new("bash")
+        .arg("-c")
+        .arg("(crontab -l; echo \"*/3 * * * * /home/alber/Desktop/sopes_p1/utils/service/create_containers.sh\") | crontab -")
+        .output()
+        .expect("Failed to set up cronjob");
+    println!("Cronjob started");
+    Ok(())
+}
+
+fn stop_cronjob() -> std::io::Result<()> {
+    Command::new("bash")
+        .arg("-c")
+        .arg("crontab -l | grep -v '/home/alber/Desktop/sopes_p1/utils/service/create_containers.sh' | crontab -")
+        .output()
+        .expect("Failed to stop cronjob");
+    println!("Cronjob stopped");
+    Ok(())
+}
+
 fn main() -> std::io::Result<()> {
+    start_cronjob().expect("Error starting cronjob");
     let fastapi_container_id = docker_manager::run_fastapi_container()?;
     let fastapi_url = "http://localhost:8000"; 
     let running = Arc::new(AtomicBool::new(true));
@@ -241,6 +262,7 @@ fn main() -> std::io::Result<()> {
         Err(e) => println!("Error generating graphs: {}", e),
     }
     println!("Shutting down FastAPI container...");
+    stop_cronjob().expect("Error stopping cronjob");
     stop_container(&fastapi_container_id); 
     println!("FastAPI container stopped.");
     exit(0);
